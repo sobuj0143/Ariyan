@@ -63,6 +63,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -77,6 +78,13 @@ import java.util.concurrent.TimeUnit
 
 const val DEFAULT_MODEL = "gemini-3.8-flash"
 
+val FALLBACK_MODELS = listOf(
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite"
+)
+
 val Context.dataStore by preferencesDataStore(name = "ariyan_settings")
 val KEY_API = stringPreferencesKey("api_key")
 val KEY_MODEL = stringPreferencesKey("model")
@@ -87,12 +95,14 @@ data class ChatMessage(
     val isError: Boolean = false
 )
 
+class ApiException(val code: Int, message: String) : Exception(message)
+
 val http: OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(30, TimeUnit.SECONDS)
     .readTimeout(60, TimeUnit.SECONDS)
     .build()
 
-suspend fun askGemini(
+suspend fun callGemini(
     apiKey: String,
     model: String,
     history: List<ChatMessage>
@@ -130,7 +140,7 @@ suspend fun askGemini(
             } catch (e: Exception) {
                 raw.take(200)
             }
-            throw Exception("${resp.code}: $msg")
+            throw ApiException(resp.code, "${resp.code}: $msg")
         }
         val parts = JSONObject(raw)
             .getJSONArray("candidates")
@@ -143,6 +153,32 @@ suspend fun askGemini(
         }
         sb.toString().trim()
     }
+}
+
+suspend fun askGemini(
+    apiKey: String,
+    model: String,
+    history: List<ChatMessage>
+): String {
+    val models = (listOf(model) + FALLBACK_MODELS).distinct()
+    var lastError: Exception? = null
+    for (m in models) {
+        attemptLoop@ for (attempt in 1..2) {
+            try {
+                return callGemini(apiKey, m, history)
+            } catch (e: ApiException) {
+                lastError = e
+                when (e.code) {
+                    503, 429, 500 -> {
+                        if (attempt == 1) delay(1500)
+                    }
+                    404 -> break@attemptLoop
+                    else -> throw e
+                }
+            }
+        }
+    }
+    throw lastError ?: Exception("Unknown error")
 }
 
 class MainActivity : ComponentActivity() {
