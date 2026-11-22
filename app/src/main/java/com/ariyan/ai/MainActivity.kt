@@ -75,7 +75,7 @@ import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-const val DEFAULT_MODEL = "gemini-2.5-flash"
+const val DEFAULT_MODEL = "gemini-3.8-flash"
 
 val Context.dataStore by preferencesDataStore(name = "ariyan_settings")
 val KEY_API = stringPreferencesKey("api_key")
